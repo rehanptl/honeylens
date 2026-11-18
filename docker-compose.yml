@@ -1,0 +1,60 @@
+# HoneyLens: Cowrie SSH honeypot -> Python pipeline -> MongoDB -> Gemini -> Django dashboard
+#
+# What is exposed to the internet:   ONLY Cowrie (fake SSH on port 22)
+# What is NOT exposed:               MongoDB (no ports), dashboard (bound to 127.0.0.1 only)
+#
+# Before running on a VM, move your REAL sshd off port 22 first. See docs/DEPLOY.md.
+
+services:
+  cowrie:
+    image: cowrie/cowrie:latest
+    restart: unless-stopped
+    ports:
+      - "22:2222"          # internet port 22 -> Cowrie's fake SSH
+      # - "23:2223"        # uncomment (and COWRIE_TELNET_ENABLED below) to also catch telnet/IoT bots
+    environment:
+      COWRIE_HONEYPOT_HOSTNAME: ${HONEYPOT_HOSTNAME:-web-prod-02}
+      COWRIE_OUTPUT_JSONLOG_ENABLED: "true"
+      # COWRIE_TELNET_ENABLED: "yes"
+    volumes:
+      - cowrie-var:/cowrie/cowrie-git/var      # logs + captured downloads live here
+    # Cowrie is a sandbox (nothing it "runs" is real) but we still keep it locked down:
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    mem_limit: 512m
+
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    # no "ports:" on purpose -> only reachable by other containers
+
+  worker:
+    build: ./app
+    restart: unless-stopped
+    command: python -m honeylens.worker
+    env_file: .env
+    environment:
+      MONGO_URI: mongodb://mongo:27017
+      LOG_GLOBS: /cowrie-var/log/cowrie/cowrie.json*,/demo-logs/*.json
+    volumes:
+      - cowrie-var:/cowrie-var:ro
+      - ./demo-logs:/demo-logs
+    depends_on: [mongo]
+
+  dashboard:
+    build: ./app
+    restart: unless-stopped
+    command: gunicorn dashboard.wsgi:application --bind 0.0.0.0:8000 --workers 2
+    env_file: .env
+    environment:
+      MONGO_URI: mongodb://mongo:27017
+    ports:
+      - "127.0.0.1:8000:8000"   # view it through an SSH tunnel, never public
+    depends_on: [mongo]
+
+volumes:
+  cowrie-var:
+  mongo-data:

@@ -1,0 +1,39 @@
+{% extends "web/base.html" %}{% load humanize %}
+{% block title %}Attack patterns{% endblock %}
+{% block content %}
+<h1>Attack patterns</h1>
+<p class="sub">Sessions that ran the same script (after removing random IPs, filenames and keys) are grouped into one pattern. Each pattern is explained by the LLM once.</p>
+
+<div class="filters">
+  <a class="tag {% if kind == 'commands' %}on{% endif %}" href="?kind=commands">Ran commands</a>
+  <a class="tag {% if kind == 'bruteforce' %}on{% endif %}" href="?kind=bruteforce">Brute force</a>
+  <a class="tag {% if kind == 'login_only' %}on{% endif %}" href="?kind=login_only">Login only</a>
+  <a class="tag {% if kind == 'scan' %}on{% endif %}" href="?kind=scan">Scans</a>
+  <a class="tag {% if kind == 'all' %}on{% endif %}" href="?kind=all">All</a>
+</div>
+{% if kind == 'commands' %}
+<div class="filters">
+  <a class="tag {% if not intent %}on{% endif %}" href="?kind=commands">Any intent</a>
+  {% for key, label in intents.items %}
+  <a class="tag {% if intent == key %}on{% endif %}" href="?kind=commands&intent={{ key }}">{{ label }}</a>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="card">
+<table>
+  <tr><th>Pattern</th><th>ATT&amp;CK</th><th>Severity</th><th class="n">Sessions</th><th class="n">IPs</th><th>Last seen</th></tr>
+  {% for c in clusters %}
+  <tr>
+    <td><a href="{% url 'cluster' c.cid %}">{{ c.analysis.name|default:"Waiting for analysis…" }}</a>
+      <div class="muted">{{ c.analysis.summary }}</div></td>
+    <td>{% for t in c.analysis.techniques|slice:":6" %}<span class="tag" title="{{ t.name }}">{{ t.id }}</span>{% endfor %}</td>
+    <td><span class="sev {{ c.analysis.severity }}">{{ c.analysis.severity|default:"—" }}</span></td>
+    <td class="n">{{ c.session_count|intcomma }}</td>
+    <td class="n">{{ c.ip_count }}</td>
+    <td class="muted">{{ c.last_seen|date:"M j, H:i" }}</td>
+  </tr>
+  {% empty %}<tr><td colspan="6" class="empty">Nothing here yet.</td></tr>{% endfor %}
+</table>
+</div>
+{% endblock %}

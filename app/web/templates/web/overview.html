@@ -1,0 +1,63 @@
+{% extends "web/base.html" %}{% load humanize %}
+{% block title %}Overview{% endblock %}
+{% block content %}
+<h1>Honeypot overview</h1>
+<p class="sub">Everything that hit the fake SSH server. Page refreshes every 5 minutes.</p>
+
+<div class="kpis">
+  {% for label, value in kpis %}
+  <div class="card kpi"><div class="v">{{ value|intcomma }}</div><div class="l">{{ label }}</div></div>
+  {% endfor %}
+</div>
+
+<div class="card" style="margin-bottom:16px">
+  <h2>Login attempts per day (last 30 days)</h2>
+  {% if daily.has_data %}
+  <svg viewBox="0 0 {{ daily.w }} {{ daily.h }}" width="100%" role="img" aria-label="Login attempts per day">
+    {% for g in daily.grid %}
+      <line class="gl" x1="{{ daily.pad_l }}" x2="{{ daily.right }}" y1="{{ g.y }}" y2="{{ g.y }}"/>
+      <text x="{{ daily.pad_l|add:'-6' }}" y="{{ g.y }}" text-anchor="end" dominant-baseline="middle">{{ g.v }}</text>
+    {% endfor %}
+    {% for b in daily.bars %}
+      <rect class="b" x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}" rx="2"><title>{{ b.day }}: {{ b.n }} attempts</title></rect>
+      {% if b.label %}<text x="{{ b.lx }}" y="{{ daily.label_y }}" text-anchor="middle">{{ b.label }}</text>{% endif %}
+    {% endfor %}
+  </svg>
+  {% else %}<div class="empty">No login attempts recorded yet.</div>{% endif %}
+</div>
+
+<div class="grid g2" style="margin-bottom:16px">
+  <div class="card">
+    <h2>What attackers were trying to do <span class="muted">(sessions with commands)</span></h2>
+    {% include "web/_bars.html" with rows=intents %}
+  </div>
+  <div class="card">
+    <h2>Top MITRE ATT&amp;CK techniques <span class="muted">(by sessions)</span></h2>
+    {% include "web/_bars.html" with rows=techniques %}
+  </div>
+</div>
+
+<div class="grid g3" style="margin-bottom:16px">
+  <div class="card"><h2>Top usernames tried</h2>{% include "web/_bars.html" with rows=usernames %}</div>
+  <div class="card"><h2>Top passwords tried</h2>{% include "web/_bars.html" with rows=passwords %}</div>
+  <div class="card"><h2>Noisiest IPs</h2>{% include "web/_bars.html" with rows=ips %}</div>
+</div>
+
+<div class="grid g2">
+  <div class="card">
+    <h2>Most common attack scripts</h2>
+    <table>
+      <tr><th>Pattern</th><th>Severity</th><th class="n">Sessions</th></tr>
+      {% for c in top_clusters %}
+      <tr>
+        <td><a href="{% url 'cluster' c.cid %}">{{ c.analysis.name|default:"Waiting for analysis…" }}</a>
+          <div class="muted">{{ c.analysis.summary }}</div></td>
+        <td><span class="sev {{ c.analysis.severity }}">{{ c.analysis.severity|default:"—" }}</span></td>
+        <td class="n">{{ c.session_count|intcomma }}</td>
+      </tr>
+      {% empty %}<tr><td colspan="3" class="muted">Nobody has run commands yet.</td></tr>{% endfor %}
+    </table>
+  </div>
+  <div class="card"><h2>SSH client software</h2>{% include "web/_bars.html" with rows=clients %}</div>
+</div>
+{% endblock %}

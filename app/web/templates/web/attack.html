@@ -1,0 +1,35 @@
+{% extends "web/base.html" %}
+{% block title %}MITRE ATT&CK{% endblock %}
+{% block content %}
+<h1>MITRE ATT&amp;CK coverage</h1>
+<p class="sub">{{ observed }} of {{ total }} Linux-relevant techniques observed. Darker = more sessions.
+  {% if rejected %}<span class="muted">· {{ rejected }} hallucinated technique ID(s) blocked by the allow-list.</span>{% endif %}</p>
+
+<style>
+  .matrix { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+  .col h3 { font-size: 12.5px; margin: 0 0 6px; color: var(--text-2); font-weight: 600; }
+  .cell { display: block; border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; margin-bottom: 4px;
+          text-decoration: none; color: var(--text-2); font-size: 12px; background: var(--surface); }
+  .cell b { color: var(--text); font-weight: 600; }
+  .cell.l1 { background: var(--seq-1); color: #0b0b0b; border-color: transparent; }
+  .cell.l2 { background: var(--seq-2); color: #0b0b0b; border-color: transparent; }
+  .cell.l3 { background: var(--seq-3); color: #fff; border-color: transparent; }
+  .cell.l4 { background: var(--seq-4); color: #fff; border-color: transparent; }
+  .cell.l1 b, .cell.l2 b { color: #0b0b0b; } .cell.l3 b, .cell.l4 b { color: #fff; }
+  .cell.l0 { opacity: .55; }
+</style>
+
+<div class="matrix">
+  {% for col in columns %}
+  <div class="col">
+    <h3>{{ col.tactic }} <span class="muted">({{ col.hit }})</span></h3>
+    {% for cell in col.cells %}
+    <a class="cell l{{ cell.level }}" href="{{ cell.url }}" target="_blank" rel="noopener noreferrer"
+       title="{{ cell.id }} {{ cell.name }}: {{ cell.sessions }} sessions across {{ cell.clusters }} patterns">
+      <b>{{ cell.id }}</b> {{ cell.name }}{% if cell.sessions %} · {{ cell.sessions }}{% endif %}
+    </a>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

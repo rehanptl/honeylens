@@ -1,0 +1,81 @@
+{% extends "web/base.html" %}
+{% block title %}{{ a.name|default:"Pattern" }}{% endblock %}
+{% block content %}
+<p><a href="{% url 'clusters' %}">← All patterns</a></p>
+<h1>{{ a.name|default:"Waiting for analysis…" }}</h1>
+<p class="sub">
+  <span class="sev {{ a.severity }}">{{ a.severity|default:"—" }} severity</span> ·
+  {{ c.session_count }} sessions from {{ ip_count }} IPs ·
+  first {{ c.first_seen|date:"M j" }}, last {{ c.last_seen|date:"M j H:i" }} UTC ·
+  <span class="muted">labelled by {{ a.source|default:"—" }}</span>
+</p>
+
+<div class="grid g2" style="margin-bottom:16px">
+  <div class="card">
+    <h2>What the attacker was doing</h2>
+    <p><strong>{{ a.summary }}</strong></p>
+    <p>{{ a.explanation }}</p>
+    {% if a.rejected_techniques %}
+      <p class="muted">Rejected {{ a.rejected_techniques|length }} technique ID(s) from the LLM that aren't in the allow-list: {{ a.rejected_techniques|join:", " }}</p>
+    {% endif %}
+  </div>
+  <div class="card">
+    <h2>MITRE ATT&amp;CK mapping</h2>
+    <table>
+      <tr><th>Technique</th><th>Tactic</th><th>Evidence</th></tr>
+      {% for t in a.techniques %}
+      <tr>
+        <td><a href="{{ t.url }}" target="_blank" rel="noopener noreferrer">{{ t.id }}</a> {{ t.name }}</td>
+        <td class="muted">{{ t.tactic }}</td>
+        <td><code>{{ t.evidence|truncatechars:90 }}</code></td>
+      </tr>
+      {% empty %}<tr><td colspan="3" class="muted">None yet.</td></tr>{% endfor %}
+    </table>
+  </div>
+</div>
+
+{% if commands %}
+<div class="card" style="margin-bottom:16px">
+  <h2>Commands from a sample session</h2>
+  <pre>{% for cmd in commands %}$ {{ cmd }}
+{% endfor %}</pre>
+</div>
+{% endif %}
+
+<div class="grid g2" style="margin-bottom:16px">
+  {% if normalized %}
+  <div class="card">
+    <h2>Fingerprint <span class="muted">(what all sessions in this pattern share)</span></h2>
+    <pre>{% for n in normalized %}{{ n }}
+{% endfor %}</pre>
+  </div>
+  {% endif %}
+  <div class="card">
+    <h2>Indicators of compromise</h2>
+    {% for i in a.iocs %}<div><code>{{ i }}</code></div>{% empty %}<div class="muted">None extracted.</div>{% endfor %}
+    {% if downloads %}
+      <h2 style="margin-top:14px">Files downloaded</h2>
+      <table><tr><th>URL</th><th class="n">Times</th></tr>
+      {% for d in downloads %}<tr><td><code>{{ d.url }}</code><div class="muted"><code>{{ d.sha256|default:"" }}</code></div></td><td class="n">{{ d.n }}</td></tr>{% endfor %}
+      </table>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <h2>Recent sessions</h2>
+  <table>
+    <tr><th>Start (UTC)</th><th>Source IP</th><th>Login</th><th>Client</th><th class="n">Failed logins</th><th class="n">Commands</th></tr>
+    {% for s in recent %}
+    <tr>
+      <td>{{ s.start|date:"M j H:i:s" }}</td>
+      <td><code>{{ s.src_ip }}</code></td>
+      <td><code>{{ s.username|default:"" }}{% if s.username %}:{{ s.password }}{% endif %}</code></td>
+      <td class="muted">{{ s.client_version|default:"" }}</td>
+      <td class="n">{{ s.login_failed|default:0 }}</td>
+      <td class="n">{{ s.command_count|default:0 }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

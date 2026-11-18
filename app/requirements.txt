@@ -1,0 +1,5 @@
+django>=5.1,<7
+gunicorn>=22
+pymongo>=4.8
+google-genai>=1.0
+pydantic>=2.6
