@@ -133,25 +133,48 @@ def cluster_sessions(db, limit: int = 5000) -> int:
     return n
 
 
+MAX_HARD_ERRORS = 3
+_TEMPORARY = ("503", "429", "500", "UNAVAILABLE", "RESOURCE_EXHAUSTED", "overloaded",
+              "high demand", "timed out", "timeout", "Connection")
+
+
+def is_temporary(error: Exception) -> bool:
+    """Server busy / rate limited / network blip: worth retrying later, not the cluster's fault."""
+    text = f"{type(error).__name__} {error}"
+    return any(marker.lower() in text.lower() for marker in _TEMPORARY)
+
+
 def analyze_clusters(db, analyzer, max_calls: int) -> int:
+    from .llm import RuleAnalyzer
+
     done = 0
     pending = db.clusters.find({"needs_analysis": True}).sort("session_count", -1).limit(max_calls)
     for cluster in pending:
         sample = db.sessions.find_one({"_id": cluster["sample_session"]}) or {}
         commands = [c["input"] for c in sample.get("commands", [])]
+        args = (
+            commands,
+            sample.get("downloads", []),
+            {"username": sample.get("username"), "password": sample.get("password")},
+        )
         try:
-            raw = analyzer.analyze(
-                commands,
-                sample.get("downloads", []),
-                {"username": sample.get("username"), "password": sample.get("password")},
-            )
-        except Exception as e:  # rate limit, network, bad JSON... try again next cycle
-            log.warning("analysis failed for %s: %s", cluster["_id"], e)
-            db.clusters.update_one({"_id": cluster["_id"]}, {"$inc": {"analysis_errors": 1}})
-            if cluster.get("analysis_errors", 0) >= 3:
-                db.clusters.update_one({"_id": cluster["_id"]}, {"$set": {"needs_analysis": False}})
-            continue
-        result = validate(raw, analyzer.source)
+            raw, source = analyzer.analyze(*args), analyzer.source
+        except Exception as e:
+            if is_temporary(e):
+                # The LLM service is busy. Don't hammer it or count this against the
+                # cluster: stop for this cycle and retry everything next cycle.
+                log.warning("LLM temporarily unavailable (%s); retrying next cycle", str(e)[:120])
+                break
+            # A real failure for this cluster (e.g. the model returned unusable output).
+            errors = cluster.get("hard_errors", 0) + 1
+            log.warning("analysis failed for %s (%d/%d): %s", cluster["_id"], errors, MAX_HARD_ERRORS, e)
+            if errors < MAX_HARD_ERRORS:
+                db.clusters.update_one({"_id": cluster["_id"]}, {"$set": {"hard_errors": errors}})
+                continue
+            # Give up on the LLM for this one, but still label it with the keyword rules
+            # so it never sits on "Pending" forever.
+            raw, source = RuleAnalyzer().analyze(*args), "rules (LLM failed)"
+        result = validate(raw, source)
         db.clusters.update_one(
             {"_id": cluster["_id"]},
             {"$set": {"analysis": result, "needs_analysis": False,

